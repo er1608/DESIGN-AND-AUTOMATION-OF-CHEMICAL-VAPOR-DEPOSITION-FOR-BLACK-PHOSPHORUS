@@ -34,34 +34,34 @@ $(wildcard ../makefile.init) \
 $(wildcard ../makefile.targets) \
 
 
-BUILD_ARTIFACT_NAME := PID_CONTROL
+BUILD_ARTIFACT_NAME := PID_CONTROL_SPI
 BUILD_ARTIFACT_EXTENSION := elf
 BUILD_ARTIFACT_PREFIX :=
 BUILD_ARTIFACT := $(BUILD_ARTIFACT_PREFIX)$(BUILD_ARTIFACT_NAME)$(if $(BUILD_ARTIFACT_EXTENSION),.$(BUILD_ARTIFACT_EXTENSION),)
 
 # Add inputs and outputs from these tool invocations to the build variables 
 EXECUTABLES += \
-PID_CONTROL.elf \
+PID_CONTROL_SPI.elf \
 
 MAP_FILES += \
-PID_CONTROL.map \
+PID_CONTROL_SPI.map \
 
 SIZE_OUTPUT += \
 default.size.stdout \
 
 OBJDUMP_LIST += \
-PID_CONTROL.list \
+PID_CONTROL_SPI.list \
 
 
 # All Target
 all: main-build
 
 # Main-build Target
-main-build: PID_CONTROL.elf secondary-outputs
+main-build: PID_CONTROL_SPI.elf secondary-outputs
 
 # Tool invocations
-PID_CONTROL.elf PID_CONTROL.map: $(OBJS) $(USER_OBJS) C:\Users\pc\STM32CubeIDE\workspace_1.10.0\PID_CONTROL\STM32F103C8TX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-gcc -o "PID_CONTROL.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m3 -T"C:\Users\pc\STM32CubeIDE\workspace_1.10.0\PID_CONTROL\STM32F103C8TX_FLASH.ld" --specs=nosys.specs -Wl,-Map="PID_CONTROL.map" -Wl,--gc-sections -static -u _printf_float --specs=nano.specs -mfloat-abi=soft -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
+PID_CONTROL_SPI.elf PID_CONTROL_SPI.map: $(OBJS) $(USER_OBJS) C:\Users\pc\STM32CubeIDE\workspace_1.10.0\PID_CONTROL_SPI\STM32F103C8TX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
+	arm-none-eabi-gcc -o "PID_CONTROL_SPI.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m3 -T"C:\Users\pc\STM32CubeIDE\workspace_1.10.0\PID_CONTROL_SPI\STM32F103C8TX_FLASH.ld" --specs=nosys.specs -Wl,-Map="PID_CONTROL_SPI.map" -Wl,--gc-sections -static -u _printf_float --specs=nano.specs -mfloat-abi=soft -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
 	@echo 'Finished building target: $@'
 	@echo ' '
 
@@ -70,14 +70,14 @@ default.size.stdout: $(EXECUTABLES) makefile objects.list $(OPTIONAL_TOOL_DEPS)
 	@echo 'Finished building: $@'
 	@echo ' '
 
-PID_CONTROL.list: $(EXECUTABLES) makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-objdump -h -S $(EXECUTABLES) > "PID_CONTROL.list"
+PID_CONTROL_SPI.list: $(EXECUTABLES) makefile objects.list $(OPTIONAL_TOOL_DEPS)
+	arm-none-eabi-objdump -h -S $(EXECUTABLES) > "PID_CONTROL_SPI.list"
 	@echo 'Finished building: $@'
 	@echo ' '
 
 # Other Targets
 clean:
-	-$(RM) PID_CONTROL.elf PID_CONTROL.list PID_CONTROL.map default.size.stdout
+	-$(RM) PID_CONTROL_SPI.elf PID_CONTROL_SPI.list PID_CONTROL_SPI.map default.size.stdout
 	-@echo ' '
 
 secondary-outputs: $(SIZE_OUTPUT) $(OBJDUMP_LIST)
