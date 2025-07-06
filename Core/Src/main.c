@@ -107,7 +107,7 @@ float Current_Temperature_Kalman = 30;
 float Current_Temperature_SPI = 30;
 KalmanFilter myFilter;
 uint8_t Current_Temperature_UART[64];	// SEND BACK TEMPERATURE FROM MCU
-float Setpoint = 30;	// NHIET DO BTH 25
+float Setpoint = 0;	// NHIET DO BTH 25
 uint8_t SPI_Temperature_UART[64];	// SEND BACK SETPOINT FROM MCU
 uint8_t SETPOINT[64];
 
@@ -300,7 +300,7 @@ int main(void)
   // ----------------------Initialize PID----------------
   PID.Kp = 1.62;
   PID.Ki = 0.001;
-  PID.Kd = 20;
+  PID.Kd = 25;
   PID.Tp = 1;
   PID.Previous_Error = 0;
   PID.Previous_u_Ki = 0;
@@ -704,6 +704,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 //}
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
+	// 2 secs per Calback
 	if(htim->Instance == TIM2 && PID_previous == 1) {
 		HAL_ADC_Start_IT(&hadc1);
 
@@ -720,20 +721,14 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
 					Stepper_flag = 1;
 				}
 
-//				if (time_count == 255) previous_time = 0;
-//
-//				if (time_count - previous_time == 2) { //10
-//					previous_time = time_count;
-//					UART_flag = 1;
-//				}
-				if((time_count % 2) == 0)
-				{
-					Setpoint += 2;
-				}
-//				previous_time = time_count;
-				UART_flag = 1;
+				if (time_count == 255) previous_time = 0;
 
-				if (time_count >= 60) { // 10min = 600
+				if (time_count - previous_time == 5) { // send packet every 10s
+					previous_time = time_count;
+					UART_flag = 1;
+				}
+
+				if (time_count >= 300) { // 10min = 600s = 300 times call
 					if (TempSET1_count >= 3) { // 650/200 = 3
 						Tset = TempSET2;
 						TempSET1_count = 0;
@@ -743,24 +738,16 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
 						break;
 					}
 
-//					time_hold += time_count;
-//					if (time_hold >= 60)  {
-//						TempSET1_count++; // 1h = 3600s
-//						time_hold = 0;
-//					}
-//					previous_time = 0;
+					time_hold += time_count;
+					if (time_hold >= 1800)  {
+						TempSET1_count++; // 1h = 3600s = 1800 times call
+						time_hold = 0;
+					}
+					previous_time = 0;
 
-//					if (time_count < 72 & (time_count % 2 == 0))
-//					{
-//						// ----------Command to set PID---------
-//						// Increasing 33C after 10mins // 200C/6 (6 times 10mins) = 33
-//						Setpoint += 1;
-//					}
-//					else
-//					{
-						TempSET1_count++;
-						time_count = 0;
-//					}
+					// ----------Command to set PID---------
+					// Increasing 33C after 10mins // 200C/6 (6 times 10mins) = 33
+					Setpoint += 33;
 
 					if (Setpoint > MAX_TEMP) Setpoint = MAX_TEMP;
 				}
@@ -769,7 +756,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
 			case TempSET2:
 				SETT = 2;
 
-				if (time_count < 100) { //1800
+				if (time_count < 900) { // 1800s = 900 times call
 					// Holding the temperature at 650C in 30mins
 //					Simulate_Temperature(PID_Output);
 					Stepper_flag = 1;
@@ -778,44 +765,38 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
 					Tset = TempSET3;
 					previous_time = 0;
 					time_count = 0;
-//					Setpoint -= 12;
 				}
 
-//				if (time_count == 255) previous_time = 0;
-//
-//				if (time_count - previous_time == 2) { //10
-//					previous_time = time_count;
-//					UART_flag = 1;
-//				}
+				if (time_count == 255) previous_time = 0;
 
-//				previous_time = time_count;
-				UART_flag = 1;
+				if (time_count - previous_time == 5) {
+					previous_time = time_count;
+					UART_flag = 1;
+				}
+
+				previous_time = time_count;
 
 				break;
 
 			case TempSET3:
 				SETT = 3;
 
-				if (time_count < 54) { //3600
+				if (time_count < 1800) { // 3600s = 1800 times call
 					// Holding the temperature in 1h
 //					Simulate_Temperature(PID_Output);
 					Stepper_flag = 1;
 				}
 
-//				if (time_count == 255) previous_time = 0;
-//
-//				if (time_count - previous_time == 2) { //10
-//					previous_time = time_count;
-//					UART_flag = 1;
-//				}
-				if((time_count % 2) == 0)
-				{
-					Setpoint -= 3;
-				}
-//				previous_time = time_count;
-				UART_flag = 1;
+				if (time_count == 255) previous_time = 0;
 
-				if (time_count == 54) { //3600
+				if (time_count - previous_time == 5) {
+					previous_time = time_count;
+					UART_flag = 1;
+				}
+
+				previous_time = time_count;
+
+				if (time_count >= 1800) {
 					if (TempSET3_count == 7) {
 						Tset = TempSET4;
 						TempSET3_count = 0;
@@ -824,13 +805,13 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
 						break;
 					}
 
-					TempSET3_count++; // 1h = 3600
-//					previous_time = 0;
+					TempSET3_count++; // 1h = 3600s = 1800 times call
+					previous_time = 0;
 					time_count = 0;
 
 					// ----------Command to set PID---------
 					// Decreasing 12C after 1h
-//					Setpoint -= 12;
+					Setpoint -= 12;
 					if (Setpoint < MIN_TEMP) Setpoint = MIN_TEMP;
 				}
 				break;
@@ -838,7 +819,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
 			case TempSET4:
 				SETT = 4;
 
-				if (time_count < 54) { //3600
+				if (time_count < 1800) {
 					// Holding the temperature at 550C in 1h
 //					Simulate_Temperature(PID_Output);
 					Stepper_flag = 1;
@@ -847,41 +828,38 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
 					Tset = TempSET5;
 					previous_time = 0;
 					time_count = 0;
-//					Setpoint -= 17;
 				}
 
-//				if (time_count == 255) previous_time = 0;
-//
-//				if (time_count - previous_time == 2) { //10
-//					previous_time = time_count;
-//					UART_flag = 1;
-//				}
+				if (time_count == 255) previous_time = 0;
+
+				if (time_count - previous_time == 5) {
+					previous_time = time_count;
+					UART_flag = 1;
+				}
 
 				previous_time = time_count;
-				UART_flag = 1;
 
 				break;
 
 			case TempSET5:
 				SETT = 5;
 
-				if (time_count < 9) { //600
+				if (time_count < 300) {
 					// Holding the temperature in 10mins
 //					Simulate_Temperature(PID_Output);
 					Stepper_flag = 1;
 				}
 
-//				if (time_count == 255) previous_time = 0;
-//
-//				if (time_count - previous_time == 2) { //10
-//					previous_time = time_count;
-//					UART_flag = 1;
-//				}
-//
-				previous_time = time_count;
-				UART_flag = 1;
+				if (time_count == 255) previous_time = 0;
 
-				if (time_count == 9) { //600
+				if (time_count - previous_time == 2) { //10
+					previous_time = time_count;
+					UART_flag = 1;
+				}
+
+				previous_time = time_count;
+
+				if (time_count >= 300) {
 					if (TempSET5_count == 5) {
 						Tset = TempSET1;
 						TempSET5_count = 0;
@@ -897,8 +875,8 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
 					}
 
 					time_hold += time_count;
-					if (time_hold == 54) {
-						TempSET5_count++; // 1h = 3600
+					if (time_hold == 1800) {
+						TempSET5_count++; // 1h = 3600s = 1800 times call
 						time_hold = 0;
 					}
 					previous_time = 0;
@@ -912,7 +890,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
 				break;
 
 			default:
-				///// ERROR
+				// ERROR
 				break;
 		}
 	}
