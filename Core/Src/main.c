@@ -40,8 +40,8 @@
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
 // Macros for Stepper
-#define Steps_Per_Cycle 166   // 1.8°/step (166 vi bien tro)
-#define MAX_ANGLE 300.0
+#define Steps_Per_Cycle 150   // 1.8°/step (166 vi bien tro)
+#define MAX_ANGLE 280.0
 #define MIN_ANGLE 0.0
 
 // Macros for SSR
@@ -54,11 +54,8 @@
 #define MIN_TEMP 25
 
 // Macros for Temperature_SPI
-#define MAX6675_CS_PORT GPIOB
-#define MAX6675_CS_PIN  GPIO_PIN_12
-
-#define MAX6675_CS_LOW()   HAL_GPIO_WritePin(MAX6675_CS_PORT, MAX6675_CS_PIN, GPIO_PIN_RESET)
-#define MAX6675_CS_HIGH()  HAL_GPIO_WritePin(MAX6675_CS_PORT, MAX6675_CS_PIN, GPIO_PIN_SET)
+#define MAX6675_CS_LOW()   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET)
+#define MAX6675_CS_HIGH()  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_SET)
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
@@ -97,20 +94,23 @@ typedef enum {
 TempSET Tset = TempSET1;
 
 // VARIABLES for Stepper---------------------------------------------
-volatile uint8_t Previous_Position = 0;	// Number of CURRENT STEPs
+volatile int Previous_Position = 0;	// Number of CURRENT STEPs
 volatile uint8_t Stepper_flag = 0;
 volatile uint8_t UART_flag = 0;
-volatile int8_t Steps2Move = 50;
+volatile int16_t Steps2Move = 0;
+volatile float test = 0;
 
 // VARIABLES for temperature-----------------------------------------
-uint8_t SET_UART[30];
-float Current_Temperature = 25;
-float Current_Temperature_Kalman = 25;
-float Current_Temperature_SPI = 25;
+uint8_t SET_UART[64];
+float Current_Temperature = 30;
+float Current_Temperature_Kalman = 30;
+float Current_Temperature_SPI = 30;
 KalmanFilter myFilter;
-uint8_t Current_Temperature_UART[30];	// SEND BACK TEMPERATURE FROM MCU
-float Setpoint = 66;	// NHIET DO BTH 25
-uint8_t Setpoint_Temperature_UART[30];	// SEND BACK SETPOINT FROM MCU
+uint8_t Current_Temperature_UART[64];	// SEND BACK TEMPERATURE FROM MCU
+float Setpoint = 30;	// NHIET DO BTH 25-30
+uint8_t SPI_Temperature_UART[64];	// SEND BACK SETPOINT FROM MCU
+uint8_t SETPOINT[64];
+
 
 // Structure for PID-------------------------------------------------
 struct Controller {
@@ -126,9 +126,7 @@ struct Controller PID;
 
 // VARIABLES for MAX6675---------------------------------------------
 extern SPI_HandleTypeDef hspi2;
-
 uint8_t max6675_rx_buf[2];
-uint8_t max6675_data_ready = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -146,29 +144,21 @@ static void MX_SPI2_Init(void);
 /* USER CODE BEGIN 0 */
 void Send_UART() {
 	  // Time out 100ms
-//	  sprintf((char *)SET_UART, "%u\n", SETT);
-//	  // Send SET
-//	  HAL_UART_Transmit(&huart1, (uint8_t *)SET_UART, strlen((char *)SET_UART), 100);
-//
-//	  sprintf((char *)Current_Temperature_UART, "Temperature: %.2f\n", Current_Temperature);
-//	  // Send current TEMP
-//	  HAL_UART_Transmit(&huart1, (uint8_t *)Current_Temperature_UART, strlen((char *)Current_Temperature_UART), 100);
-//
-//	  sprintf((char *)Setpoint_Temperature_UART, "Set: %.2f\n", Setpoint);
-//	  // Send set point
-//	  HAL_UART_Transmit(&huart1, (uint8_t *)Setpoint_Temperature_UART, strlen((char *)Setpoint_Temperature_UART), 100);
+	  sprintf((char *)SET_UART, "%u\n", SETT);
+	  // Send SET
+	  HAL_UART_Transmit(&huart1, (uint8_t *)SET_UART, strlen((char *)SET_UART), 100);
 
-	  sprintf((char *)Current_Temperature_UART, "Temperature: %.2f\n", Current_Temperature);
+	  sprintf((char *)SETPOINT, "Set: %.2f\n", Setpoint);
+	  // Send SET
+	  HAL_UART_Transmit(&huart1, (uint8_t *)SETPOINT, strlen((char *)SETPOINT), 100);
+
+	  sprintf((char *)Current_Temperature_UART, "Temperature: %.2f\n", Current_Temperature_Kalman);
 	  // Send current TEMP
 	  HAL_UART_Transmit(&huart1, (uint8_t *)Current_Temperature_UART, strlen((char *)Current_Temperature_UART), 100);
 
-	  sprintf((char *)Setpoint_Temperature_UART, "Temperature Kalman: %.2f\n", Current_Temperature_Kalman);
-	  // Send set point
-	  HAL_UART_Transmit(&huart1, (uint8_t *)Setpoint_Temperature_UART, strlen((char *)Setpoint_Temperature_UART), 100);
-
-	  sprintf((char *)SET_UART, "Temperature MAX6675: %.2f\n", Current_Temperature_SPI);
-	  // Send SET
-	  HAL_UART_Transmit(&huart1, (uint8_t *)SET_UART, strlen((char *)SET_UART), 100);
+	  sprintf((char *)SPI_Temperature_UART, "Temperature_SPI: %.2f\n", test);
+	  // Send current TEMP
+	  HAL_UART_Transmit(&huart1, (uint8_t *)SPI_Temperature_UART, strlen((char *)SPI_Temperature_UART), 100);
 }
 
 float PID_Controller() {
@@ -205,48 +195,43 @@ void SSR_Control()
     } else {
         HAL_GPIO_WritePin(SSR_PORT, SSR_PIN, GPIO_PIN_RESET);  // SSR OFF
     }
-
-//	if (Current_Temperature_Kalman <= 45) {
-//		HAL_GPIO_WritePin(SSR_PORT, SSR_PIN, GPIO_PIN_SET);  // SSR ON
-//	}
-//	else if (Current_Temperature_Kalman >= 50){
-//		HAL_GPIO_WritePin(SSR_PORT, SSR_PIN, GPIO_PIN_RESET);  // SSR OFF
-//	}
 }
 
 //--------------------STEPPER PART---------------------------
-int8_t PID2STEPS(float PID) {
-	uint8_t target_Position;
-	int8_t Steps2Move;
-	float angle = PID * MAX_ANGLE; // PID (0;1)
+void PID2STEPS(float PID) {
+	int target_Position;
 
-	// Avoid out of Stepper Range
-	if (angle > MAX_ANGLE) angle = MAX_ANGLE;
-	if (angle < MIN_ANGLE) angle = MIN_ANGLE;
+    if (PID > 1.0f) PID = 1.0f;
+    if (PID < 0.0f) PID = 0.0f;
+
+	float angle = PID * MAX_ANGLE;
 
 	target_Position = (uint8_t)(angle * Steps_Per_Cycle / 300.0);	// TINH VI TRI XOAY
-	Steps2Move = target_Position - Previous_Position;	// TINH SO BUOC CAN QUAY THEM
-	Previous_Position = target_Position;
+	test = (uint8_t)(angle * Steps_Per_Cycle / 300.0);
+    if (target_Position > Steps_Per_Cycle) target_Position = Steps_Per_Cycle;
+	if (target_Position < 0) target_Position = 0;
 
-	return Steps2Move;
+	test = target_Position;
+	Steps2Move = target_Position - Previous_Position;
+	Previous_Position = target_Position;
 }
 
-void Stepper(int8_t Steps_Move)
+void Stepper()
 {
 	uint8_t steps = 0;
 
-	if (Steps_Move > 0) {
+	if (Steps2Move > 0) {
 		DIR = 1;
 		HAL_GPIO_WritePin(GPIOA, GPIO_PIN_1, DIR);
 	}
 
-	if (Steps_Move < 0) {
+	if (Steps2Move < 0) {
 		DIR = 0;
 		HAL_GPIO_WritePin(GPIOA, GPIO_PIN_1, DIR);
-		Steps_Move *= (-1);
+		Steps2Move *= (-1);
 	}
 
-	while (steps < Steps_Move)
+	while (steps < Steps2Move)
 	{
 			steps++;
 			HAL_GPIO_WritePin(GPIOA, GPIO_PIN_2, 0);
@@ -258,25 +243,15 @@ void Stepper(int8_t Steps_Move)
 	PID_previous = 1;
 }
 //--------------------------------------------------------
-
-void MAX6675_StartRead(void)
-{
-    max6675_data_ready = 0;
-    MAX6675_CS_LOW();
-
-    HAL_SPI_Receive_IT(&hspi2, max6675_rx_buf, 2);
-}
-
 float MAX6675_GetTemperature(void)
 {
-    if (!max6675_data_ready) return 0;
+	MAX6675_CS_LOW();
+	HAL_SPI_Receive(&hspi2, max6675_rx_buf, 1, 50);
+	MAX6675_CS_HIGH();
+    float Temp = (max6675_rx_buf[0]|(max6675_rx_buf[1] << 8)) >> 3;
+    Temp *= 0.25f;
 
-    uint16_t raw = (max6675_rx_buf[0] << 8) | max6675_rx_buf[1];
-
-    if (raw & 0x4) return -1.0f;
-
-    raw >>= 3;
-    return raw * 0.25f;
+    return Temp;
 }
 
 /* USER CODE END 0 */
@@ -316,9 +291,9 @@ int main(void)
   /* USER CODE BEGIN 2 */
   HAL_UART_Receive_IT(&huart1, (uint8_t *)rxBuffer, 1);
   // ----------------------Initialize PID----------------
-  PID.Kp = 0.03928;
-  PID.Ki = 0.0002692;
-  PID.Kd = 0.01957;
+  PID.Kp = 1.62;
+  PID.Ki = 0.001;
+  PID.Kd = 25;
   PID.Tp = 1;
   PID.Previous_Error = 0;
   PID.Previous_u_Ki = 0;
@@ -329,7 +304,7 @@ int main(void)
 
   KalmanFilter_Init(&myFilter, Q, R);
 
-  float Temp_MAX6675;
+  float PID_Output;
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -338,21 +313,21 @@ int main(void)
   {
 	  if (Stepper_flag) {
 		  PID_previous = 0;
+
+		  if (Current_Temperature_Kalman < Setpoint)
+		  {
+			  PID_Output = PID_Controller();
+			  PID2STEPS(PID_Output);
+		  }
+		  else PID2STEPS(0);
+
 		  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_0, GPIO_PIN_RESET);	//ENA
-		  Stepper(Steps2Move);
+		  Stepper();
 		  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_0, GPIO_PIN_SET);	//ENA
 		  Stepper_flag = 0;
 	  }
 
 	  if (UART_flag) {
-		  //-------------------MAX6675----------------
-		  MAX6675_StartRead();
-
-		  Temp_MAX6675 = MAX6675_GetTemperature();
-		  Current_Temperature_SPI = (Temp_MAX6675 != 0 && Temp_MAX6675 != -1) ? Temp_MAX6675 : Current_Temperature_SPI;
-		  //Current_Temperature_SPI = KalmanFilter_Update(&myFilter, Current_Temperature_SPI);
-		  //------------------------------------------
-
 		  Send_UART();
 		  UART_flag = 0;
 	  }
@@ -516,7 +491,7 @@ static void MX_TIM2_Init(void)
   htim2.Instance = TIM2;
   htim2.Init.Prescaler = 7200-1;
   htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim2.Init.Period = 10000-1;
+  htim2.Init.Period = 20000-1;
   htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
@@ -591,6 +566,9 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_7, GPIO_PIN_RESET);
 
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
+
   /*Configure GPIO pins : PA0 PA1 */
   GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
@@ -605,26 +583,32 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
+  /*Configure GPIO pin : PB12 */
+  GPIO_InitStruct.Pin = GPIO_PIN_12;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
 }
 
 /* USER CODE BEGIN 4 */
-void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef *hspi)
-{
-    if (hspi->Instance == SPI2)
-    {
-        MAX6675_CS_HIGH();
-        max6675_data_ready = 1;
-    }
-}
-
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 {
 	uint32_t adc_value;
+	float Temp_MAX6675;
 	if (hadc->Instance == ADC1)
 	{
 		adc_value = HAL_ADC_GetValue(&hadc1);
-		Current_Temperature = (adc_value * (800.0f / 4096)) + 30;
+		Current_Temperature = (adc_value * (800.0f / 4096)) - 10;
 		Current_Temperature_Kalman = KalmanFilter_Update(&myFilter, Current_Temperature);
+
+		//-------------------MAX6675----------------
+		Temp_MAX6675 = MAX6675_GetTemperature();
+		Current_Temperature_SPI = (Temp_MAX6675 > 0) ? Temp_MAX6675 : Current_Temperature_SPI;
+		//Current_Temperature_SPI = KalmanFilter_Update(&myFilter, Current_Temperature_SPI);
+		//------------------------------------------
+
 	}
 }
 
@@ -646,6 +630,11 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 
         else if (strcmp(received_data, "2") == 0) // "2" OFF
         {
+        	PID2STEPS(0);
+        	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_0, GPIO_PIN_RESET);	//ENA
+        	Stepper();
+        	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_0, GPIO_PIN_SET);	//ENA
+
 			Tset = TempSET1;
 			TempSET5_count = 0;
 			previous_time = 0;
@@ -657,81 +646,32 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 
         else if (strcmp(received_data, "3") == 0) // "3" reset
         {
+        	PID2STEPS(0);
+        	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_0, GPIO_PIN_RESET);	//ENA
+        	Stepper();
+        	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_0, GPIO_PIN_SET);	//ENA
+
 			Tset = TempSET1;
 			TempSET5_count = 0;
 			previous_time = 0;
 			time_count = 0;
 			time_hold = 0;
 			TIM2_SET = 0;
+			Current_Temperature = 25;
+			Previous_Position = 0;
+			Steps2Move = 0;
+
 			HAL_TIM_Base_Stop_IT(&htim2);
 
 			HAL_TIM_Base_Start_IT(&htim2);
 			TIM2_SET = 1;
         }
-
-        else if (strcmp(received_data, "4") == 0)
-        {
-        	Current_Temperature = 50;
-        }
-
-        else if (strcmp(received_data, "5") == 0)
-		{
-			Current_Temperature = 200;
-		}
-
-        else if (strcmp(received_data, "6") == 0)
-		{
-			Current_Temperature = 400;
-		}
-
-		else if (strcmp(received_data, "7") == 0)
-		{
-			Current_Temperature = 550;
-		}
     }
 }
 
-//float T_ambient = 25.0f;           // Nhiệt độ môi trưong
-//float alpha = 0.1f;                // Hệ số tác động của PID
-//float beta = 0.05f;                // Hệ số mất nhiệt
-
-//void Simulate_Temperature(float PID_Output) {
-//	if (PID_Output > 1) PID_Output = 1;
-//	if (PID_Output < 0) PID_Output = 0;
-//	Current_Temperature += alpha * PID_Output - beta * (Current_Temperature - T_ambient);
-//}
-
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
-	if(htim->Instance == TIM2) {
-
-//		HAL_ADC_Start_IT(&hadc1);
-
-		float PID_Output = 0;
-
-		time_count++;
-
-		if (Current_Temperature <= 100) PID_Output = 0.25;
-		else if (Current_Temperature > 100 && Current_Temperature <= 300) PID_Output = 0.5;
-		else if (Current_Temperature > 300 && Current_Temperature <= 500) PID_Output = 0.75;
-		else if (Current_Temperature > 500 && Current_Temperature <= 600) PID_Output = 1;
-
-		if (PID_previous == 1)
-		{
-			Steps2Move = PID2STEPS(PID_Output);
-			Stepper_flag = 1;
-		}
-
-		if (time_count - previous_time == 3) {
-			previous_time = time_count;
-			UART_flag = 1;
-		}
-	}
-}
-
-/*void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
-	if(htim->Instance == TIM2) {
-		float PID_Output;
-
+	// Tick every 2 seconds
+	if(htim->Instance == TIM2 && PID_previous == 1) {
 		HAL_ADC_Start_IT(&hadc1);
 
 		time_count++;
@@ -741,21 +681,19 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
 			case TempSET1:
 				SETT = 1;
 
-				if (time_count < 9 && PID_previous == 1) { //600
+				if (time_count < 60) {
 					// Holding the temperature in 10mins
-					PID_Output = PID_Controller();
-					Steps2Move = PID2STEPS(PID_Output);
-//					Simulate_Temperature(PID_Output);
 					Stepper_flag = 1;
 				}
 
-				if (time_count - previous_time == 3) { //10
-					previous_time = time_count;
-					UART_flag = 1;
+				if((time_count % 2) == 0)
+				{
+					Setpoint += 2;
 				}
+				UART_flag = 1;
 
-				if (time_count == 9) { // 10min = 600
-					if (TempSET1_count == 3) { // 650/200 = 3
+				if (time_count >= 60) {
+					if (TempSET1_count >= 3) {
 						Tset = TempSET2;
 						TempSET1_count = 0;
 						previous_time = 0;
@@ -764,17 +702,9 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
 						break;
 					}
 
-					time_hold += time_count;
-					if (time_hold == 54)  {
-						TempSET1_count++; // 1h = 3600s
-						time_hold = 0;
-					}
-					previous_time = 0;
+					TempSET1_count++;
 					time_count = 0;
 
-					// ----------Command to set PID---------
-					// Increasing 33C after 10mins // 200C/6 (6 times 10mins) = 33
-					Setpoint += 33;
 					if (Setpoint > MAX_TEMP) Setpoint = MAX_TEMP;
 				}
 				break;
@@ -782,44 +712,36 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
 			case TempSET2:
 				SETT = 2;
 
-				if (time_count < 27  && PID_previous == 1) { //1800
+				if (time_count < 100) {
 					// Holding the temperature at 650C in 30mins
-					PID_Output = PID_Controller();
-					Steps2Move = PID2STEPS(PID_Output);
-//					Simulate_Temperature(PID_Output);
 					Stepper_flag = 1;
 				}
 				else {
 					Tset = TempSET3;
 					previous_time = 0;
 					time_count = 0;
-					Setpoint -= 12;
 				}
 
-				if (time_count - previous_time == 3) { //10
-					previous_time = time_count;
-					UART_flag = 1;
-				}
+				UART_flag = 1;
 
 				break;
 
 			case TempSET3:
 				SETT = 3;
 
-				if (time_count < 54 && PID_previous == 1) { //3600
+				if (time_count < 54) {
 					// Holding the temperature in 1h
-					PID_Output = PID_Controller();
-					Steps2Move = PID2STEPS(PID_Output);
-//					Simulate_Temperature(PID_Output);
 					Stepper_flag = 1;
 				}
 
-				if (time_count - previous_time == 3) { //10
-					previous_time = time_count;
-					UART_flag = 1;
+				if((time_count % 2) == 0)
+				{
+					Setpoint -= 3;
 				}
 
-				if (time_count == 54) { //3600
+				UART_flag = 1;
+
+				if (time_count == 54) {
 					if (TempSET3_count == 7) {
 						Tset = TempSET4;
 						TempSET3_count = 0;
@@ -828,13 +750,9 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
 						break;
 					}
 
-					TempSET3_count++; // 1h = 3600
-					previous_time = 0;
+					TempSET3_count++;
 					time_count = 0;
 
-					// ----------Command to set PID---------
-					// Decreasing 12C after 1h
-					Setpoint -= 12;
 					if (Setpoint < MIN_TEMP) Setpoint = MIN_TEMP;
 				}
 				break;
@@ -842,44 +760,36 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
 			case TempSET4:
 				SETT = 4;
 
-				if (time_count < 54 && PID_previous == 1) { //3600
+				if (time_count < 54) {
 					// Holding the temperature at 550C in 1h
-					PID_Output = PID_Controller();
-					Steps2Move = PID2STEPS(PID_Output);
-//					Simulate_Temperature(PID_Output);
 					Stepper_flag = 1;
 				}
 				else {
 					Tset = TempSET5;
 					previous_time = 0;
 					time_count = 0;
-					Setpoint -= 17;
 				}
 
-				if (time_count - previous_time == 3) { //10
-					previous_time = time_count;
-					UART_flag = 1;
-				}
+				previous_time = time_count;
+				UART_flag = 1;
 
 				break;
 
 			case TempSET5:
 				SETT = 5;
 
-				if (time_count < 9 && PID_previous == 1) { //600
+				if (time_count < 9) {
 					// Holding the temperature in 10mins
-					PID_Output = PID_Controller();
-					Steps2Move = PID2STEPS(PID_Output);
-//					Simulate_Temperature(PID_Output);
 					Stepper_flag = 1;
 				}
 
-				if (time_count - previous_time == 3) { //10
-					previous_time = time_count;
-					UART_flag = 1;
+				if((time_count % 2) == 0)
+				{
+					Setpoint -= 3;
 				}
+				UART_flag = 1;
 
-				if (time_count == 9) { //600
+				if (time_count == 9) {
 					if (TempSET5_count == 5) {
 						Tset = TempSET1;
 						TempSET5_count = 0;
@@ -887,21 +797,17 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
 						time_count = 0;
 						time_hold = 0;
 						TIM2_SET = 0;
+						Previous_Position = 0;
+						Steps2Move = 0;
+						Current_Temperature = 25;
 						HAL_TIM_Base_Stop_IT(&htim2);
 						break;
 					}
 
-					time_hold += time_count;
-					if (time_hold == 54) {
-						TempSET5_count++; // 1h = 3600
-						time_hold = 0;
-					}
-					previous_time = 0;
+					TempSET5_count++;
 					time_count = 0;
 
 					// ----------Command to set PID---------
-					// Decreasing 17C after 10mins
-					Setpoint -= 17;
 					if (Setpoint < MIN_TEMP) Setpoint = MIN_TEMP;
 				}
 				break;
@@ -911,7 +817,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
 				break;
 		}
 	}
-}*/
+}
 /* USER CODE END 4 */
 
 /**
