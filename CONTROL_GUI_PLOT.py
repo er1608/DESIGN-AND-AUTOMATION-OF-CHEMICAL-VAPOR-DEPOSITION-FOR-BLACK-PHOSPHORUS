@@ -4,7 +4,7 @@ import serial.tools.list_ports
 from datetime import datetime
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QComboBox
+    QComboBox, QLineEdit
 )
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtCore import QTimer, Qt
@@ -82,7 +82,7 @@ class STM32GUI(QWidget):
 
         self.reset_button = QPushButton("Khởi động lại")
         self.reset_button.setStyleSheet("background-color: orange; color: black;")
-        self.reset_button.clicked.connect(self.reset_values)
+        self.reset_button.clicked.connect(lambda: self.send_signal("3"))
         control_layout.addWidget(self.reset_button)
 
         self.status_label = QLabel("Trạng thái:")
@@ -97,6 +97,40 @@ class STM32GUI(QWidget):
             self.led_labels.append(led)
             status_layout.addWidget(led)
         control_layout.addLayout(status_layout)
+
+        # Nhập thời gian duy trì T1-T5 và nhiệt độ S1, S2, S3, S4 theo cột
+        self.duration_inputs = []
+        self.temp_inputs = {}
+
+        duration_grid_layout = QHBoxLayout()
+        for i in range(5):
+            col_layout = QVBoxLayout()
+
+            time_input = QLineEdit()
+            time_input.setPlaceholderText(f"T{i+1} (s)")
+            time_input.setFixedWidth(60)
+            self.duration_inputs.append(time_input)
+            col_layout.addWidget(time_input)
+
+            if i + 1 in [1, 2, 3, 4]:
+                temp_input = QLineEdit()
+                temp_input.setPlaceholderText(f"S{i+1} (°C)")
+                temp_input.setFixedWidth(60)
+                self.temp_inputs[i + 1] = temp_input
+                col_layout.addWidget(temp_input)
+            else:
+                spacer = QLabel()
+                spacer.setFixedHeight(24)
+                col_layout.addWidget(spacer)
+
+            duration_grid_layout.addLayout(col_layout)
+
+        control_layout.addLayout(duration_grid_layout)
+
+        self.send_all_button = QPushButton("Gửi")
+        self.send_all_button.setStyleSheet("background-color: #007ACC; color: white;")
+        self.send_all_button.clicked.connect(self.send_all_settings)
+        control_layout.addWidget(self.send_all_button)
 
         mini_display_layout = QHBoxLayout()
         self.temp_display = QLabel("Temp: --- °C")
@@ -155,38 +189,38 @@ class STM32GUI(QWidget):
     def send_signal(self, signal: str):
         if self.serial_port and self.serial_port.is_open:
             try:
-                self.serial_port.write(signal.encode())
+                message = f"{signal}\n"
+                print(f"[SEND] Đang gửi: {message.strip()}")
+                self.serial_port.write(message.encode())
             except Exception as e:
                 print(f"Lỗi khi gửi tín hiệu: {e}")
         else:
+            print(f"[ERR] UART chưa kết nối khi gửi {signal}")
+
+
+    def send_all_settings(self):
+        if self.serial_port and self.serial_port.is_open:
+            for idx, input_box in enumerate(self.duration_inputs):
+                value = input_box.text().strip()
+                if value:
+                    message = f"T{idx+1}:{value}\n"
+                    self.serial_port.write(message.encode())
+                    print(f"[UART] Sent: {message.strip()}")
+
+            for key in self.temp_inputs:
+                value = self.temp_inputs[key].text().strip()
+                if value:
+                    message = f"S{key}:{value}\n"
+                    self.serial_port.write(message.encode())
+                    print(f"[UART] Sent: {message.strip()}")
+        else:
             print("Cổng UART chưa được kết nối.")
 
-    def reset_values(self):
-        self.temp_display.setText("Temp: --- °C")
-        self.spi_display.setText("SPI: --- °C")
-        self.set_display.setText("Set: --- °C")
-        self.counter = 0
-        self.temp_data.clear()
-        self.setpoint_data.clear()
-        self.time_data.clear()
-        self.send_signal("3")
-
-    # def update_plot(self):
-    #     self.temp_line.set_data(range(len(self.temp_data)), self.temp_data)
-    #     self.set_line.set_data(range(len(self.setpoint_data)), self.setpoint_data)
-    #     self.ax.relim()
-    #     self.ax.autoscale_view()
-    #     self.plot_canvas.draw()
-
     def update_plot(self):
-        # Dữ liệu x tự động tăng theo số mẫu
         x_vals = list(range(len(self.temp_data)))
-        
-        # Cập nhật dữ liệu vào biểu đồ
         self.temp_line.set_data(x_vals, self.temp_data)
         self.set_line.set_data(x_vals, self.setpoint_data)
 
-        # Trượt trục X theo 100 điểm gần nhất
         if len(x_vals) >= 100:
             x_min = len(x_vals) - 100
             x_max = len(x_vals)
@@ -195,11 +229,8 @@ class STM32GUI(QWidget):
             x_max = 100
 
         self.ax.set_xlim(x_min, x_max)
-
-        # Chỉ autoscale trục Y (nhiệt độ)
         self.ax.relim()
         self.ax.autoscale_view(scalex=True, scaley=True)
-
         self.plot_canvas.draw()
 
     def read_serial(self):
