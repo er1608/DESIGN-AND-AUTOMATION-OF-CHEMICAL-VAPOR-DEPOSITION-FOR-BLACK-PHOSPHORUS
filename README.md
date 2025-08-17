@@ -1,7 +1,7 @@
 
 # Design and automation of chemical vapor deposition for black phosphorus
 
-## 1. Giới thiệu
+## 1. Introduction
 
 This project focuses on designing and automating the Chemical Vapor Deposition (CVD) process to synthesize Black Phosphorus. It integrates hardware control STM32 with a user-friendly graphical interface for monitoring and management.
 
